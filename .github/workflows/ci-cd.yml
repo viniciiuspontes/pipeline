@@ -1,0 +1,138 @@
+name: Pipeline de duplicidades
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: Validar e processar dados
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Identificar arquivos alterados
+        shell: bash
+        run: |
+          echo "Evento: ${{ github.event_name }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Arquivos modificados:"
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git diff \
+              --name-status \
+              "origin/${{ github.base_ref }}...HEAD"
+          elif git rev-parse HEAD^ >/dev/null 2>&1; then
+            git diff --name-status HEAD^ HEAD
+          else
+            git show \
+              --pretty="" \
+              --name-status \
+              "${{ github.sha }}"
+          fi
+
+      - name: Validar presença do CSV
+        shell: bash
+        run: |
+          test -f data/duplicates.csv
+          test -s data/duplicates.csv
+
+          echo "Arquivo CSV localizado e não está vazio."
+
+      - name: Validar sintaxe Python
+        run: |
+          python -m compileall -q main.py src tests
+
+      - name: Executar testes
+        run: |
+          pytest -v
+
+      - name: Analisar dados duplicados
+        run: |
+          python main.py
+
+      - name: Validar resultados
+        shell: bash
+        run: |
+          test -s output/duplicates_clean.csv
+          test -f output/duplicate_records.csv
+          test -s site/index.html
+
+          grep -q \
+            "Relatório de dados duplicados" \
+            site/index.html
+
+          echo "Processamento validado com sucesso."
+
+      - name: Armazenar base processada
+        uses: actions/upload-artifact@v4
+        with:
+          name: resultados-da-validacao
+          path: |
+            output/duplicates_clean.csv
+            output/duplicate_records.csv
+          retention-days: 7
+
+      - name: Configurar GitHub Pages
+        if: >
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main'
+        uses: actions/configure-pages@v5
+
+      - name: Preparar relatório para publicação
+        if: >
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  cd:
+    name: Publicar relatório
+    needs: ci
+
+    if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Publicar no GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
