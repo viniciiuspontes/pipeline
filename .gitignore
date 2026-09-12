@@ -1,1 +1,10 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/
 
+output/
+site/
+
+# Não versionar a base caso ela possua dados sensíveis
+data/*.csv
