@@ -76,7 +76,7 @@ jobs:
 
       - name: Executar testes
         run: |
-          pytest -v
+          python -m pytest -v
 
       - name: Analisar dados duplicados
         run: |
